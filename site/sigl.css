@@ -1,0 +1,30 @@
+html, body {
+    height: 100%;
+}
+
+html {
+    display: table;
+    margin: auto;
+}
+
+body {
+    display: table-cell;
+    vertical-align: middle;
+    background-color: #303030;
+}
+
+#platform {
+    width: 690px;
+    height: 690px;
+    border: 1px solid #242424;
+    box-shadow: 0px 0px 3px #242424;
+    background-color: #3c3c3c;
+}
+#canvas {
+    width: 690px;
+    height: 690px;
+}
+#inkpot {
+    display: block;
+    margin: 0 auto 0 auto;
+}
