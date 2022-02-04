@@ -29,7 +29,14 @@ function randclt(n) {
 // Server class that will reach out to the server for settings
 let SigilServer = class {
     constructor(host) {
-        // connect websocket
+        // server has endpoints for:
+        // get_config: give a unique identifier and get back room config
+        // send_strokes: sends in completed drawing
+        // get_done: get back x/total submitted for your room, poll this
+        // get_room: get current completed drawing
+        // create_room: create a room for x people and returns links (used in beginning)
+
+        // unique identifier is the last part of the url
     }
 }
 
