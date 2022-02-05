@@ -2,38 +2,42 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"log"
 	"math"
 	"math/big"
+	m_rand "math/rand"
 	"net/http"
 	"os"
+	"path"
+	"strconv"
 	"sync"
 	"time"
 )
 
 type userConfig struct {
-	clr             string
-	ink             float32
-	depth           float32
-	centered        uint
-	bristles        uint
-	smoothing       float32
-	lift_smoothing  float32
-	start_smoothing float32
+	Clr            string
+	Ink            float32
+	Depth          float32
+	Centered       uint
+	Bristles       uint
+	Smoothing      float32
+	LiftSmoothing  float32
+	StartSmoothing float32
 }
 
 type dotsConfig struct {
-	clr     string
-	points  uint
-	d       float32
-	rp      float32
-	pointup bool
+	Clr     string
+	Points  uint32
+	D       float32
+	Rp      float32
+	Pointup bool
 }
 
 type roomConfig struct {
-	bg   string
-	dots []dotsConfig
+	Bg   string
+	Dots []dotsConfig
 }
 
 type userInfo struct {
@@ -49,31 +53,96 @@ type roomInfo struct {
 	submitted int
 	conf      roomConfig
 	file      string
-	flock     sync.Mutex
+	flock     *sync.Mutex
 }
 
 var roomsLock sync.RWMutex
 var rooms map[uint32]roomInfo
 
+var imgPath string
+
 // get_config: give a unique identifier and get back room config
 func getConfig(w http.ResponseWriter, r *http.Request) {
-	//TODO
+	// get id and uid from req
+	id_str := r.PostFormValue("id")
+	if len(id_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	id64, err := strconv.ParseUint(id_str, 10, 32)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	id := uint32(id64)
+
+	uid_str := r.PostFormValue("uid")
+	if len(id_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	uid64, err := strconv.ParseUint(uid_str, 10, 32)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	uid := uint32(uid64)
+
 	// lock rooms for reading
-	// check the user exists
-	// copy over config data
-	// unlock rooms
+	ok := false
+	var uc userConfig
+	var rc roomConfig
+	{
+		roomsLock.RLock()
+
+		// check the room/user exists
+		_, ok = rooms[id]
+		if ok {
+			ok = false
+			for k := range rooms[id].users {
+				if uid == rooms[id].users[k].uid {
+					ok = true
+					rc = rooms[id].conf
+					uc = rooms[id].users[k].conf
+					break
+				}
+			}
+		}
+
+		// unlock rooms
+		roomsLock.RUnlock()
+	}
+
 	// generate a config for the user to return
 	// respond
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			Uc userConfig
+			Rc roomConfig
+		}{
+			Uc: uc,
+			Rc: rc,
+		},
+		)
+	}
 }
 
 // send_strokes: sends in completed drawing
 func sendStrokes(w http.ResponseWriter, r *http.Request) {
-	var prevSubmit int
-
-	//TODO
 	// get drawing information sumbitted
+	// get id and uid and data from req
+
 	// lock the rooms mux for reading
 	// lock the file mux
+
+	// if there is no file, just create one
 
 	// edit the new data
 	// write the new data into a new file
@@ -85,74 +154,179 @@ func sendStrokes(w http.ResponseWriter, r *http.Request) {
 
 // get_done: get back x/total submitted for your room, polled
 func getDone(w http.ResponseWriter, r *http.Request) {
-	var id uint32
-
 	var done int
 	var outof int
-	// get id from req
 
-	roomsLock.RLock()
+	// get id and uid from req
 
-	_, ok := rooms[id]
-
-	if ok {
-		outof = len(rooms[id].users)
-		done = rooms[id].submitted
+	id_str := r.PostFormValue("id")
+	if len(id_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
-	roomsLock.RUnlock()
-
-	//TODO respond based on ok and done, outof
-}
-
-// get_room: get current completed drawing
-//TODO don't need this? Just have predictable file paths based on id?
-func getRoom(w http.ResponseWriter, r *http.Request) {
-	var id uint32
-	var imgpath string
-
-	// get id from req
-	roomsLock.RLock()
-
-	_, ok := rooms[id]
-
-	if ok {
-		imgpath = rooms[id].file
+	id64, err := strconv.ParseUint(id_str, 10, 32)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
-	roomsLock.RUnlock()
+	id := uint32(id64)
 
-	//TODO respond based on ok and imgpath
+	uid_str := r.PostFormValue("uid")
+	if len(id_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	uid64, err := strconv.ParseUint(uid_str, 10, 32)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	uid := uint32(uid64)
+
+	var ok bool = false
+	{
+		roomsLock.RLock()
+
+		_, ok := rooms[id]
+
+		if ok {
+			ok = false
+			for k := range rooms[id].users {
+				if uid == rooms[id].users[k].uid {
+					ok = true
+					break
+				}
+			}
+		}
+
+		if ok {
+			outof = len(rooms[id].users)
+			done = rooms[id].submitted
+		}
+
+		roomsLock.RUnlock()
+	}
+
+	// respond based on ok and done, outof
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]int{done, outof})
+	}
 }
 
 // create_room: create a room for x people and returns links (used in beginning)
 func createRoom(w http.ResponseWriter, r *http.Request) {
 	// get how many players
+	num_str := r.PostFormValue("num")
+	if len(num_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	num, err := strconv.ParseUint(num_str, 10, 8)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
 	// generate the room info
 	var rinf roomInfo
-	//TODO create room
+
+	// create room
+	rinf.exp = time.Now().Add(time.Hour * 21)
+	rinf.users = make([]userInfo, num)
+	rinf.submitted = 0
+	rinf.conf.Bg = "#3f3f4d" //TODO randomize in a good range
+
+	var pup bool = (m_rand.Int() & 1) == 1
+	var pts uint32 = (m_rand.Uint32() & 0x7) + 3
+	var dia float32 = 2.0 / 3.0
+	dia += m_rand.Float32() - 0.5
+	rinf.conf.Dots = []dotsConfig{{
+		Clr:     "#000000",
+		Points:  pts,
+		D:       dia,
+		Rp:      3,
+		Pointup: pup,
+	}}
+
+	var resp []uint32 = make([]uint32, num+1)
+	for i := 0; i < int(num); i++ {
+		// loop to generate uids and make sure we don't reuse one
+		for {
+			uid := m_rand.Uint32()
+			ok := true
+			for j := 0; j < i; j++ {
+				if rinf.users[j].uid == uid {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				rinf.users[i].uid = uid
+				resp[i] = uid
+				break
+			}
+		}
+
+		rinf.users[i].conf = userConfig{
+			Clr:            "#000000", // TODO randomize in a good range
+			Ink:            153000.0,
+			Depth:          72.0,
+			Centered:       uint((m_rand.Uint32() % 9) + 6),
+			Bristles:       uint((m_rand.Uint32() % 60) + 60),
+			Smoothing:      0.21,
+			LiftSmoothing:  0.06,
+			StartSmoothing: 0.021,
+		}
+	}
 
 	maxid := big.NewInt(math.MaxUint32)
 	var id32 uint32
-	roomsLock.Lock()
-	for {
-		id, err := rand.Int(rand.Reader, maxid)
-		if err != nil {
-			log.Panicf("Could not generate random id! %v", err)
-		}
+	var fname string
+	{
+		roomsLock.Lock()
+		for {
+			id, err := rand.Int(rand.Reader, maxid)
+			if err != nil {
+				log.Panicf("Could not generate random id! %v", err)
+			}
 
-		id32 = uint32(id.Uint64())
+			id32 = uint32(id.Uint64())
 
-		_, ok := rooms[id32]
-		if !ok {
-			rooms[id32] = rinf
-			break
+			_, ok := rooms[id32]
+			if !ok {
+				rinf.id = id32
+				fname = strconv.FormatUint(uint64(id32), 10) + ".png"
+				rinf.file = path.Join("/sigils", fname)
+				rooms[id32] = rinf
+				break
+			}
+			// else continue to gen numbers till we find one
 		}
-		// else continue to gen numbers till we find one
+		roomsLock.Unlock()
 	}
-	roomsLock.Unlock()
-	log.Printf("Creating new room: %x", id32)
+
+	file, err := os.Create(path.Join(imgPath, fname))
+	if err != nil {
+		log.Panicf("Could not create backing file for sigil: %v", err)
+	}
+
+	log.Printf("Creating new room: %x (%q)(%q)", id32, rinf.file, file.Name())
+	file.Close()
+
+	// add in the room id
+	resp[num] = id32
+
+	// Generate the response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func serveRoom(w http.ResponseWriter, r *http.Request) {
@@ -170,14 +344,16 @@ func cleanRooms() {
 		now := time.Now()
 		for {
 			found = false
-			roomsLock.RLock()
-			for k := range rooms {
-				if rooms[k].exp.After(now) {
-					id = k
-					break
+			{
+				roomsLock.RLock()
+				for k := range rooms {
+					if rooms[k].exp.After(now) {
+						id = k
+						break
+					}
 				}
+				roomsLock.RUnlock()
 			}
-			roomsLock.RUnlock()
 
 			if found {
 				roomsLock.Lock()
@@ -199,9 +375,16 @@ func main() {
 
 	flag.Parse()
 
+	sd, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		log.Panicf("Error getting a seed: %v", err)
+	}
+	m_rand.Seed(sd.Int64())
 	rooms = make(map[uint32]roomInfo)
 
 	log.Printf("Starting up sigl server on port %v @ %v", *port, *imgdir)
+
+	imgPath = *imgdir
 
 	fileServer := http.FileServer(http.Dir("site"))
 	http.Handle("/", fileServer)
@@ -211,7 +394,6 @@ func main() {
 	http.HandleFunc("/api/get_config", getConfig)
 	http.HandleFunc("/api/send_strokes", sendStrokes)
 	http.HandleFunc("/api/get_done", getDone)
-	http.HandleFunc("/api/get_room", getRoom)
 	http.HandleFunc("/api/create_room", createRoom)
 
 	// start goroutine to clean up timed-out rooms

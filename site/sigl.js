@@ -1,6 +1,5 @@
 'use strict';
 
-
 function randbm() {
     var u = 0;
     var v = 0;
@@ -24,20 +23,6 @@ function randclt(n) {
     v *= 2.0;
     v -= 1.0;
     return v;
-}
-
-// Server class that will reach out to the server for settings
-let SigilServer = class {
-    constructor(host) {
-        // server has endpoints for:
-        // get_config: give a unique identifier and get back room config
-        // send_strokes: sends in completed drawing
-        // get_done: get back x/total submitted for your room, poll this
-        // get_room: get current completed drawing
-        // create_room: create a room for x people and returns links (used in beginning)
-
-        // unique identifier is the last part of the url
-    }
 }
 
 let SigilBrush = class {
@@ -329,7 +314,45 @@ let SigilCanvas = class {
     }
 }
 
-//TODO use SigilServer
+// Server class that will reach out to the server for settings
+let SigilServer = class {
+    constructor(host) {
+        // server has endpoints at /api/ for:
+        // get_config: give a unique identifier and get back room config
+        // send_strokes: sends in completed drawing
+        // get_done: get back x/total submitted for your room, poll this
+        // create_room: create a room for x people and returns links (used in beginning)
+
+        // unique identifier is the last part of the url
+    }
+
+    getConf() {
+        //TODO
+    }
+
+    sendPaint(img) {
+        //TODO
+    }
+}
+
+function Setup() {
+    let serv = new SigilServer(document.location.origin);
+    let conf = serv.getConf();
+
+    if (conf == undefined) {
+        console.log("Error, could not get conf");
+        TestSetup();
+        return;
+    }
+
+    let canvas = document.getElementById("canvas");
+    let platform = document.getElementById("platform");
+    let inkpot = document.getElementById("inkpot");
+    let sc = new SigilCanvas(canvas, platform, inkpot, serv.sendPaint);
+
+    sc.setBoard(config);
+    sc.enable(true);
+}
 
 function DowloadTest(img) {
         img = img.replace("image/png", "image/octet-stream");
@@ -364,9 +387,9 @@ function TestSetup() {
             {
                 clr: "#000000",         // color of guide dots
                 points: 5,              // number of guides
-                d: 2.0/3.0,               // diameter of guide circle as ratio of canvas height
-                rp: 3,                 // dot radius in pixels
-                pointup: true,           // point at top, or flat
+                d: 2.0/3.0,             // diameter of guide circle as ratio of canvas height
+                rp: 3,                  // dot radius in pixels
+                pointup: true,          // point at top, or flat
             },
         ],
     };
@@ -374,4 +397,4 @@ function TestSetup() {
     sc.enable(true);
 }
 
-TestSetup();
+//TestSetup();
