@@ -17,27 +17,27 @@ import (
 )
 
 type userConfig struct {
-	Clr            string
-	Ink            float32
-	Depth          float32
-	Centered       uint
-	Bristles       uint
-	Smoothing      float32
-	LiftSmoothing  float32
-	StartSmoothing float32
+	Clr            string  `json:"clr"`
+	Ink            float32 `json:"ink"`
+	Depth          float32 `json:"depth"`
+	Centered       uint    `json:"centered"`
+	Bristles       uint    `json:"bristles"`
+	Smoothing      float32 `json:"smoothing"`
+	LiftSmoothing  float32 `json:"lift_smoothing"`
+	StartSmoothing float32 `json:"start_smoothing"`
 }
 
 type dotsConfig struct {
-	Clr     string
-	Points  uint32
-	D       float32
-	Rp      float32
-	Pointup bool
+	Clr     string  `json:"clr"`
+	Points  uint32  `json:"points"`
+	D       float32 `json:"d"`
+	Rp      float32 `json:"rp"`
+	Pointup bool    `json:"pointup"`
 }
 
 type roomConfig struct {
-	Bg   string
-	Dots []dotsConfig
+	Bg   string       `json:"bg"`
+	Dots []dotsConfig `json:"dots"`
 }
 
 type userInfo struct {
@@ -97,6 +97,7 @@ func getConfig(w http.ResponseWriter, r *http.Request) {
 	ok := false
 	var uc userConfig
 	var rc roomConfig
+	var submitted bool
 	{
 		roomsLock.RLock()
 
@@ -109,6 +110,7 @@ func getConfig(w http.ResponseWriter, r *http.Request) {
 					ok = true
 					rc = rooms[id].conf
 					uc = rooms[id].users[k].conf
+					submitted = rooms[id].users[k].submitted
 					break
 				}
 			}
@@ -125,11 +127,13 @@ func getConfig(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(struct {
-			Uc userConfig
-			Rc roomConfig
+			Uc        userConfig
+			Rc        roomConfig
+			Submitted bool
 		}{
-			Uc: uc,
-			Rc: rc,
+			Uc:        uc,
+			Rc:        rc,
+			Submitted: submitted,
 		},
 		)
 	}
@@ -137,6 +141,7 @@ func getConfig(w http.ResponseWriter, r *http.Request) {
 
 // send_strokes: sends in completed drawing
 func sendStrokes(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Got incoming strokes")
 	// get drawing information sumbitted
 	// get id and uid and data from req
 
@@ -193,7 +198,7 @@ func getDone(w http.ResponseWriter, r *http.Request) {
 	{
 		roomsLock.RLock()
 
-		_, ok := rooms[id]
+		_, ok = rooms[id]
 
 		if ok {
 			ok = false

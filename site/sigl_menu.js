@@ -25,7 +25,6 @@ start_btn.addEventListener("click", function(evt) {
         fetch("/api/create_room", {
             method: 'POST',
             body: formdata,
-            redirect: 'manual',
         }).then((resp) => {
             //TODO handle a bad response
             return resp.json();
@@ -33,7 +32,7 @@ start_btn.addEventListener("click", function(evt) {
             if (data.length == (v+1)) {
                 let id = data[v];
                 for (let i=0; i < v; i++) {
-                    let link = window.location.href + 's/' + id + '.' + data[i]
+                    let link = window.location.origin + '/s/' + id + '.' + data[i]
                     let li = document.createElement('li');
                     let a = document.createElement('a');
                     li.appendChild(a);

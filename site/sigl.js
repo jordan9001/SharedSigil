@@ -213,7 +213,7 @@ let SigilCanvas = class {
             // we put our background on the div behind us
             let drew = that.brush.update_pos(x, y);
             if (drew) {
-                if (firstdraw) {
+                if (that.firstdraw) {
                     that.firstdraw = false;
                     start_cb();
                 }
@@ -319,8 +319,16 @@ let SigilCanvas = class {
 // Server class that will reach out to the server for settings
 let SigilServer = class {
     state = "UNCONNECTED";
+    gettingResult = false;
     btn = null;
-    constructor(btn) {
+    btn_val = "";
+    canvas = null;
+    subcount = 0;
+    subtotal = 0;
+    id = 0;
+    uid = 0;
+
+    constructor(btn, canvas) {
         // server has endpoints at /api/ for:
         // get_config: give a unique identifier and get back room config
         // send_strokes: sends in completed drawing
@@ -328,44 +336,122 @@ let SigilServer = class {
         // create_room: create a room for x people and returns links (used in beginning)
 
         // unique identifier is the last part of the url
-
-        // first check if this uid has already submitted, and if so just get the goods
+        let l = window.location.pathname.split('/');
+        let ids = l[l.length - 1].split('.');
+        this.id = ids[0];
+        this.uid = ids[1];
+        console.log("Got ID: " + this.id + " UID: " + this.uid);
 
         this.btn = btn;
+        this.btn_val = "SEND";
+        this.canvas = canvas;
         btn.disabled = true;
+        let that = this;
         btn.addEventListener("click", function() {
-            if (state != 'DRAWING') {
-                return;
+            if (that.btn_val == 'SEND') {
+                that.sendPaint();
+            } else if (that.btn_val == 'SAVE') {
+                DownloadImg(that.canvas);
             }
-            sendPaint();
         }, false);
 
         // start timed callback to poll for how many people are done
-        setTimeout(this.pollDone, 15000);
+        setTimeout(function() {that.pollDone();}, 12000);
     }
 
     getConf(cb) {
-        state = "GETTING CONF"
+        this.state = "GETTING CONF"
+
+        let that = this;
+
+        let formdata = new FormData();
+        formdata.append("id", this.id);
+        formdata.append("uid", this.uid);
+
+        fetch("/api/get_config", {
+            method: 'POST',
+            body: formdata,
+        }).then((resp) => {
+            return resp.json();
+        }).then((data) => {
+            // sanity check top level of data
+            if (!data.hasOwnProperty("Uc") || !data.hasOwnProperty("Rc") || !data.hasOwnProperty("Submitted")) {
+                console.log("Unexpected response to get_config");
+                that.state = "ERROR";
+                return;
+            }
+
+            // send config along
+            cb(data);
+        });
     }
 
     sendPaint() {
-        state = 'SENDING';
+        this.state = 'SENDING';
 
         // send the drawing to the server, then get the image and see how many are done
         //TODO
+
+        console.log("Sending strokes");
     }
 
     startDrawing() {
-        state = 'DRAWING';
+        this.state = 'DRAWING';
         this.btn.disabled = false;
     }
 
-    pollDone() {
-        // call the get_done endpoint
+    getUpdate() {
         //TODO
+        console.log("Getting result");
+    }
+
+    pollDone() {
+        if (this.subtotal != 0 && this.subcount == this.subtotal) {
+            // stop polling
+            return;
+        }
+        // call the get_done endpoint
+        let that = this;
+
+        let formdata = new FormData();
+        formdata.append("id", this.id);
+        formdata.append("uid", this.uid);
+
+        fetch("/api/get_done", {
+            method: 'POST',
+            body: formdata,
+        }).then((resp) => {
+            return resp.json();
+        }).then((data) => {
+            let done = data[0];
+            let total = data[1];
+            if (done > that.subcount) {
+                that.subcount = done;
+                that.subtotal = total;
+                that.btn.value = that.btn_val;
+                that.btn.value += "("+that.subcount+"/"+that.subtotal+")";
+
+                if (that.gettingResult) {
+                    that.getUpdate();
+                }
+            }
+        });
 
         // loop until we see that everyone is done
-        setTimeout(this.pollDone, 9000);
+        setTimeout(function() {that.pollDone();}, 9000);
+    }
+
+    setUpdating() {
+        // go get the image from the server and set so that we keep doing so when the poll gets an updated count
+        this.state = "DONE";
+        this.btn_val = "SAVE";
+        this.btn.value = this.btn_val;
+        if (this.subcount != 0) {
+            this.btn.value += "("+this.subcount+"/"+this.subtotal+")";
+        }
+
+        this.getUpdate();
+        this.gettingResult = true;
     }
 }
 
@@ -376,8 +462,10 @@ function Setup() {
         return;
     }
 
+    let canvas = document.getElementById("canvas");
+
     let btn = document.getElementById("btn");
-    let serv = new SigilServer(btn);
+    let serv = new SigilServer(btn, canvas);
     serv.getConf(function(conf) {
         if (conf == undefined) {
             console.log("Error, could not get conf");
@@ -385,17 +473,29 @@ function Setup() {
             return;
         }
 
-        let canvas = document.getElementById("canvas");
         let platform = document.getElementById("platform");
         let inkpot = document.getElementById("inkpot");
-        let sc = new SigilCanvas(canvas, platform, inkpot, serv.sendPaint, serv.startDrawing);
+        let sc = new SigilCanvas(canvas, platform, inkpot, function() {
+            serv.sendPaint();
+        }, function() {
+            serv.startDrawing()
+        });
 
-        sc.setBoard(conf);
-        sc.enable(true);
+        // convert conf to usable config
+        let config = conf.Rc;
+        config.brush = conf.Uc;
+        sc.setBoard(config);
+
+        if (!conf.submitted) {
+            sc.enable(true);
+        } else {
+            // if we have already submitted then just have the server start updating the canvas as appropriate
+            serv.setUpdating();
+        }
     });
 }
 
-function DowloadTest(canvas) {
+function DownloadImg(canvas) {
     // get image data
     console.log("Saving");
     var img = canvas.toDataURL("image/png");
@@ -418,7 +518,7 @@ function SingleSetup() {
     btn.addEventListener("click", function() {
         console.log("Save button clicked");
         btn.disabled = true;
-        DowloadTest(canvas);
+        DownloadImg(canvas);
         btn.disabled = false;
     }, false);
     let sc = new SigilCanvas(canvas, platform, inkpot, function(){});
