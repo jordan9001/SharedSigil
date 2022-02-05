@@ -52,7 +52,8 @@ type roomInfo struct {
 	users     []userInfo
 	submitted int
 	conf      roomConfig
-	file      string
+	file      string // URI version
+	filepath  string // os version
 	flock     *sync.Mutex
 }
 
@@ -156,6 +157,7 @@ func sendStrokes(w http.ResponseWriter, r *http.Request) {
 func getDone(w http.ResponseWriter, r *http.Request) {
 	var done int
 	var outof int
+	var submitted int = 0
 
 	// get id and uid from req
 
@@ -197,6 +199,9 @@ func getDone(w http.ResponseWriter, r *http.Request) {
 			ok = false
 			for k := range rooms[id].users {
 				if uid == rooms[id].users[k].uid {
+					if rooms[id].users[k].submitted {
+						submitted = 1
+					}
 					ok = true
 					break
 				}
@@ -216,7 +221,7 @@ func getDone(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	} else {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]int{done, outof})
+		json.NewEncoder(w).Encode([]int{done, outof, submitted})
 	}
 }
 
@@ -277,7 +282,7 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 
 		rinf.users[i].conf = userConfig{
 			Clr:            "#000000", // TODO randomize in a good range
-			Ink:            153000.0,
+			Ink:            240000.0 / float32(num),
 			Depth:          72.0,
 			Centered:       uint((m_rand.Uint32() % 9) + 6),
 			Bristles:       uint((m_rand.Uint32() % 60) + 60),
@@ -304,6 +309,7 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				rinf.id = id32
 				fname = strconv.FormatUint(uint64(id32), 10) + ".png"
+				rinf.filepath = path.Join(imgPath, fname)
 				rinf.file = path.Join("/sigils", fname)
 				rooms[id32] = rinf
 				break
@@ -313,13 +319,8 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 		roomsLock.Unlock()
 	}
 
-	file, err := os.Create(path.Join(imgPath, fname))
-	if err != nil {
-		log.Panicf("Could not create backing file for sigil: %v", err)
-	}
-
-	log.Printf("Creating new room: %x (%q)(%q)", id32, rinf.file, file.Name())
-	file.Close()
+	log.Printf("Creating new room: %x (%q = %q)", id32, rinf.file, rinf.filepath)
+	// file not actually created until there is something to put
 
 	// add in the room id
 	resp[num] = id32
@@ -371,7 +372,7 @@ func cleanRooms() {
 
 func main() {
 	var port = flag.String("port", "10987", "Port for sigil server")
-	var imgdir = flag.String("dir", "./", "Path to image directory")
+	var imgdir = flag.String("dir", "./testimgs", "Path to image directory")
 
 	flag.Parse()
 

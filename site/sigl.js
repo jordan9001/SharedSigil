@@ -183,7 +183,7 @@ let SigilCanvas = class {
     inkmax = 0.0;
     done_cb = null;
 
-    constructor(element, bg, pot, done_cb) {
+    constructor(element, bg, pot, done_cb, start_cb) {
         this.ctx = element.getContext("2d");
         // initial state
         this.w = element.clientWidth;
@@ -193,6 +193,7 @@ let SigilCanvas = class {
         this.bg = bg;
         this.inkpot = pot;
         this.done_cb = done_cb;
+        this.firstdraw = true;
 
         this.brushdata = this.ctx.createImageData(this.w, this.h);
         
@@ -212,6 +213,10 @@ let SigilCanvas = class {
             // we put our background on the div behind us
             let drew = that.brush.update_pos(x, y);
             if (drew) {
+                if (firstdraw) {
+                    that.firstdraw = false;
+                    start_cb();
+                }
                 // update inkpot
                 let potw = (that.brush.ink / that.inkmax) * that.w;
                 if (potw < 0.0) {
@@ -298,11 +303,8 @@ let SigilCanvas = class {
     writeOut() {
         this.enable(false);
 
-        // get image data
-        var img = canvas.toDataURL("image/png");
-
         if (this.done_cb) {
-            this.done_cb(img);
+            this.done_cb();
         }
     }
 
@@ -316,7 +318,9 @@ let SigilCanvas = class {
 
 // Server class that will reach out to the server for settings
 let SigilServer = class {
-    constructor(host) {
+    state = "UNCONNECTED";
+    btn = null;
+    constructor(btn) {
         // server has endpoints at /api/ for:
         // get_config: give a unique identifier and get back room config
         // send_strokes: sends in completed drawing
@@ -324,52 +328,102 @@ let SigilServer = class {
         // create_room: create a room for x people and returns links (used in beginning)
 
         // unique identifier is the last part of the url
+
+        // first check if this uid has already submitted, and if so just get the goods
+
+        this.btn = btn;
+        btn.disabled = true;
+        btn.addEventListener("click", function() {
+            if (state != 'DRAWING') {
+                return;
+            }
+            sendPaint();
+        }, false);
+
+        // start timed callback to poll for how many people are done
+        setTimeout(this.pollDone, 15000);
     }
 
-    getConf() {
+    getConf(cb) {
+        state = "GETTING CONF"
+    }
+
+    sendPaint() {
+        state = 'SENDING';
+
+        // send the drawing to the server, then get the image and see how many are done
         //TODO
     }
 
-    sendPaint(img) {
+    startDrawing() {
+        state = 'DRAWING';
+        this.btn.disabled = false;
+    }
+
+    pollDone() {
+        // call the get_done endpoint
         //TODO
+
+        // loop until we see that everyone is done
+        setTimeout(this.pollDone, 9000);
     }
 }
 
 function Setup() {
-    let serv = new SigilServer(document.location.origin);
-    let conf = serv.getConf();
-
-    if (conf == undefined) {
-        console.log("Error, could not get conf");
-        TestSetup();
+    // if we are not at a /s/# uri, then just go single right away
+    if (!window.location.pathname.startsWith("/s/")) {
+        SingleSetup();
         return;
     }
 
+    let btn = document.getElementById("btn");
+    let serv = new SigilServer(btn);
+    serv.getConf(function(conf) {
+        if (conf == undefined) {
+            console.log("Error, could not get conf");
+            SingleSetup();
+            return;
+        }
+
+        let canvas = document.getElementById("canvas");
+        let platform = document.getElementById("platform");
+        let inkpot = document.getElementById("inkpot");
+        let sc = new SigilCanvas(canvas, platform, inkpot, serv.sendPaint, serv.startDrawing);
+
+        sc.setBoard(conf);
+        sc.enable(true);
+    });
+}
+
+function DowloadTest(canvas) {
+    // get image data
+    console.log("Saving");
+    var img = canvas.toDataURL("image/png");
+    img = img.replace("image/png", "image/octet-stream");
+
+    var a = document.createElement('a');
+    a.href = img;
+    a.download = "brushstrokes.png";
+    document.body.appendChild(a);
+    a.click();
+}
+
+function SingleSetup() {
     let canvas = document.getElementById("canvas");
     let platform = document.getElementById("platform");
     let inkpot = document.getElementById("inkpot");
-    let sc = new SigilCanvas(canvas, platform, inkpot, serv.sendPaint);
+    let btn = document.getElementById("btn");
+    btn.value = "SAVE";
+    btn.disabled = true;
+    btn.addEventListener("click", function() {
+        console.log("Save button clicked");
+        btn.disabled = true;
+        DowloadTest(canvas);
+        btn.disabled = false;
+    }, false);
+    let sc = new SigilCanvas(canvas, platform, inkpot, function(){});
 
-    sc.setBoard(config);
-    sc.enable(true);
-}
-
-function DowloadTest(img) {
-        img = img.replace("image/png", "image/octet-stream");
-
-        var a = document.createElement('a');
-        a.href = img;
-        a.download = "brushstrokes.png";
-        document.body.appendChild(a);
-        a.click();
-}
-
-function TestSetup() {
-    let canvas = document.getElementById("canvas");
-    let platform = document.getElementById("platform");
-    let inkpot = document.getElementById("inkpot");
-    let sc = new SigilCanvas(canvas, platform, inkpot, DowloadTest);
-
+    // TODO randomize config
     let config = {
         brush: {
             depth: 72,                  // size of brush
@@ -379,7 +433,7 @@ function TestSetup() {
             smoothing: 0.21,            // how much to smooth mouse path
             lift_smoothing: 0.06,       // how much to smooth mouse velocity
             start_smoothing: 0.021,     // how quick to ease into start of stroke
-            ink: 153000,                // amount of ink for brush
+            ink: 180000,                // amount of ink for brush
             clr: "#000000",             // color of ink
         },
         bg: "#3f3f4d",                  // background behind canvas
@@ -388,7 +442,7 @@ function TestSetup() {
                 clr: "#000000",         // color of guide dots
                 points: 5,              // number of guides
                 d: 2.0/3.0,             // diameter of guide circle as ratio of canvas height
-                rp: 3,                  // dot radius in pixels
+                rp: 1.5,                  // dot radius in pixels
                 pointup: true,          // point at top, or flat
             },
         ],
@@ -397,4 +451,5 @@ function TestSetup() {
     sc.enable(true);
 }
 
-//TestSetup();
+
+Setup();

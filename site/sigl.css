@@ -11,6 +11,36 @@ body {
     display: table-cell;
     vertical-align: middle;
     background-color: #303030;
+    color: slategrey;
+    font-size: 16px;
+}
+
+p {
+    color: slategrey;
+    font-size: 18px;
+    display: block;
+    margin: auto auto auto auto;
+    text-align: center;
+}
+
+form {
+    align-content: center;
+}
+
+ul {
+    list-style-type: none;
+}
+
+a {
+    color: slategrey;
+    font-size: 18px;
+    display: block;
+    margin: auto auto auto auto;
+    text-align: center;
+}
+
+a:visited {
+    color: darkslategrey;
 }
 
 #platform {
@@ -27,4 +57,27 @@ body {
 #inkpot {
     display: block;
     margin: 0 auto 0 auto;
+}
+
+.btn {
+    background-color: #303030;
+    border: 1px solid #242424;
+    box-shadow: 0px 0px 3px #242424;
+    color: slategrey;
+    padding: 15px 32px;
+    text-align: center;
+    display: block;
+    font-size: 16px;
+    margin: auto auto auto auto;
+}
+
+.btn:active {
+    transform: scale(0.98);
+    box-shadow: 3px 3px 6px #242424;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  color: darkslategrey;
 }
