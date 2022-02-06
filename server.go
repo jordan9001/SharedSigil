@@ -2,8 +2,14 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"io"
 	"log"
 	"math"
 	"math/big"
@@ -12,6 +18,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -47,14 +54,12 @@ type userInfo struct {
 }
 
 type roomInfo struct {
-	id        uint32
-	exp       time.Time
-	users     []userInfo
-	submitted int
-	conf      roomConfig
-	file      string // URI version
-	filepath  string // os version
-	flock     *sync.Mutex
+	id       uint32
+	exp      time.Time
+	users    []userInfo
+	conf     roomConfig
+	filepath string // os version
+	flock    *sync.Mutex
 }
 
 var roomsLock sync.RWMutex
@@ -142,26 +147,198 @@ func getConfig(w http.ResponseWriter, r *http.Request) {
 // send_strokes: sends in completed drawing
 func sendStrokes(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Got incoming strokes")
-	// get drawing information sumbitted
+
 	// get id and uid and data from req
+	id_str := r.PostFormValue("id")
+	if len(id_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	id64, err := strconv.ParseUint(id_str, 10, 32)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	id := uint32(id64)
+
+	uid_str := r.PostFormValue("uid")
+	if len(id_str) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	uid64, err := strconv.ParseUint(uid_str, 10, 32)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	uid := uint32(uid64)
+
+	base64prefix := "data:image/png;base64,"
+
+	data := r.PostFormValue("img")
+	if len(data) < len(base64prefix) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasPrefix(data, base64prefix) {
+		log.Printf("Unknown prefix on image!")
+		return
+	}
+
+	data = data[len(base64prefix):]
+
+	// parse out the file and make sure it matches
+	reader := base64.NewDecoder(base64.StdEncoding, strings.NewReader(data))
+	img, _, err := image.Decode(reader)
+	if err != nil {
+		log.Printf("Failed to properly decode image")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	rgba, ok := img.(*image.NRGBA)
+	if !ok {
+		log.Printf("Image provided was not nrgba type")
+		rct := img.Bounds()
+		rgba = image.NewNRGBA(rct)
+		draw.Draw(rgba, rct, img, rct.Min, draw.Src)
+	}
 
 	// lock the rooms mux for reading
+	roomsLock.RLock()
+	defer roomsLock.RUnlock()
+
+	_, ok = rooms[id]
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	ok = false
+	usr_idx := 0
+	for k := range rooms[id].users {
+		if uid == rooms[id].users[k].uid {
+			ok = true
+			usr_idx = k
+			break
+		}
+	}
+	if !ok {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	// lock the file mux
+	rooms[id].flock.Lock()
+	defer rooms[id].flock.Unlock()
 
 	// if there is no file, just create one
+	file, err := os.OpenFile(rooms[id].filepath, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		log.Printf("Unable to open/create image file")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	finfo, err := file.Stat()
+	if err != nil {
+		log.Printf("Unable to stat image file")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// at this point we can count the user as having submitted
+	rooms[id].users[usr_idx].submitted = true
+
+	if finfo.Size() <= 0 {
+		// new file, just write the stuff in
+		err = png.Encode(file, rgba)
+		if err != nil {
+			log.Printf("Unable to write out fresh image file")
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// parse the existing image
+	e_img, _, err := image.Decode(file)
+	if err != nil {
+		log.Printf("Unable to parse image already on disk?")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	e_rgba, ok := e_img.(*image.NRGBA)
+	if !ok {
+		log.Printf("Image on disk was not expected NRGBA?")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	i_bounds := rgba.Bounds()
+	e_bounds := e_rgba.Bounds()
+	if i_bounds != e_bounds {
+		log.Printf("Image sizes don't match?")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	// edit the new data
+	for y := i_bounds.Min.Y; y < i_bounds.Max.Y; y++ {
+		for x := i_bounds.Min.X; x < i_bounds.Max.X; x++ {
+			//TODO some better combo than just add or multiply? subtract maybe?
+
+			var r int32
+			var g int32
+			var b int32
+			var a int32
+
+			p := rgba.NRGBAAt(x, y)
+			ep := e_rgba.NRGBAAt(x, y)
+
+			r = int32(p.R) + int32(ep.R)
+			if r > math.MaxUint8 {
+				r = math.MaxUint8
+			}
+			g = int32(p.G) + int32(ep.G)
+			if g > math.MaxUint8 {
+				g = math.MaxUint8
+			}
+			b = int32(p.B) + int32(ep.B)
+			if b > math.MaxUint8 {
+				b = math.MaxUint8
+			}
+			a = int32(p.A) + int32(ep.A)
+			if a > math.MaxUint8 {
+				a = math.MaxUint8
+			}
+
+			e_rgba.SetNRGBA(x, y, color.NRGBA{uint8(r), uint8(g), uint8(b), uint8(a)})
+		}
+	}
+
+	//TODO
 	// write the new data into a new file
 	// replace the old file (so requests wont get half written files)
 
-	// release the file mux
-	// release the rooms mux
+	file.Seek(0, io.SeekStart)
+	err = png.Encode(file, e_rgba)
+	if err != nil {
+		log.Printf("Unable to write out changed image")
+		w.WriteHeader(http.StatusInternalServerError)
+	}
 }
 
 // get_done: get back x/total submitted for your room, polled
 func getDone(w http.ResponseWriter, r *http.Request) {
-	var done int
-	var outof int
+	var done int = 0
+	var outof int = 0
 	var submitted int = 0
 
 	// get id and uid from req
@@ -203,20 +380,19 @@ func getDone(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			ok = false
 			for k := range rooms[id].users {
+				if rooms[id].users[k].submitted {
+					done += 1
+				}
 				if uid == rooms[id].users[k].uid {
 					if rooms[id].users[k].submitted {
 						submitted = 1
 					}
 					ok = true
-					break
 				}
 			}
 		}
 
-		if ok {
-			outof = len(rooms[id].users)
-			done = rooms[id].submitted
-		}
+		outof = len(rooms[id].users)
 
 		roomsLock.RUnlock()
 	}
@@ -251,8 +427,8 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 	// create room
 	rinf.exp = time.Now().Add(time.Hour * 21)
 	rinf.users = make([]userInfo, num)
-	rinf.submitted = 0
 	rinf.conf.Bg = "#3f3f4d" //TODO randomize in a good range
+	rinf.flock = &sync.Mutex{}
 
 	var pup bool = (m_rand.Int() & 1) == 1
 	var pts uint32 = (m_rand.Uint32() & 0x7) + 3
@@ -315,7 +491,6 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 				rinf.id = id32
 				fname = strconv.FormatUint(uint64(id32), 10) + ".png"
 				rinf.filepath = path.Join(imgPath, fname)
-				rinf.file = path.Join("/sigils", fname)
 				rooms[id32] = rinf
 				break
 			}
@@ -324,7 +499,7 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 		roomsLock.Unlock()
 	}
 
-	log.Printf("Creating new room: %x (%q = %q)", id32, rinf.file, rinf.filepath)
+	log.Printf("Creating new room: %x (%q)", id32, rinf.filepath)
 	// file not actually created until there is something to put
 
 	// add in the room id
@@ -364,7 +539,7 @@ func cleanRooms() {
 			if found {
 				roomsLock.Lock()
 				// remove the value and delete the file
-				file = rooms[id].file
+				file = rooms[id].filepath
 				delete(rooms, id)
 				os.Remove(file)
 				roomsLock.Unlock()

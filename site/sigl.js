@@ -390,9 +390,28 @@ let SigilServer = class {
         this.state = 'SENDING';
 
         // send the drawing to the server, then get the image and see how many are done
-        //TODO
 
         console.log("Sending strokes");
+
+        let img = this.canvas.toDataURL("image/png");
+        if (!img.startsWith("data:image/png;base64,")) {
+            console.log("Unknown DataURL type!");
+        }
+
+        let formdata = new FormData();
+        formdata.append("img", img);
+        formdata.append("id", this.id);
+        formdata.append("uid", this.uid);
+
+        let that = this;
+
+        fetch("/api/send_strokes", {
+            method: 'POST',
+            body: formdata,
+        }).then((resp) => {
+            //TODO check we got a good response
+            that.setUpdating();
+        })
     }
 
     startDrawing() {
