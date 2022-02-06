@@ -1,3 +1,3 @@
 # SharedSigil
 
-A very simple shared canvas program that will combine participant's strokes after they finish.
+A simple toy program that will combine participant's brush strokes after they finish.
