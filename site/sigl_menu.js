@@ -10,7 +10,7 @@ start_btn.addEventListener("click", function(evt) {
     if (v > 0) {
         if (v == 1) {
             // go to the single player page
-            window.location.href += 'sigl.html'
+            window.location.href =  window.location.origin + '/sigl.html'
             return;
         }
 

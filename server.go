@@ -571,7 +571,7 @@ func cleanRooms() {
 			{
 				roomsLock.RLock()
 				for k := range rooms {
-					if rooms[k].exp.After(now) {
+					if now.After(rooms[k].exp) {
 						id = k
 						found = true
 						break
