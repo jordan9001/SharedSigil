@@ -420,8 +420,23 @@ let SigilServer = class {
     }
 
     getUpdate() {
-        //TODO
         console.log("Getting result");
+
+        let that = this;
+
+        let path = "/sigils/" + this.id + ".png"
+        fetch(path).then((resp) => {
+            return resp.blob();
+        }).then((data) => {
+            let ctx = that.canvas.getContext('2d');
+            let img = new Image();
+            img.onload = function() {
+                ctx.clearRect(0, 0, that.canvas.clientWidth, that.canvas.clientHeight);
+                ctx.drawImage(img, 0, 0);
+            };
+
+            img.src = URL.createObjectURL(data);
+        });
     }
 
     pollDone() {
@@ -505,7 +520,7 @@ function Setup() {
         config.brush = conf.Uc;
         sc.setBoard(config);
 
-        if (!conf.submitted) {
+        if (!conf.Submitted) {
             sc.enable(true);
         } else {
             // if we have already submitted then just have the server start updating the canvas as appropriate
@@ -540,10 +555,32 @@ function SingleSetup() {
         DownloadImg(canvas);
         btn.disabled = false;
     }, false);
-    let sc = new SigilCanvas(canvas, platform, inkpot, function(){});
+    let sc = new SigilCanvas(canvas, platform, inkpot, function(){}, function(){
+        btn.disabled = false;
+    });
 
-    // TODO randomize config
-    let config = {
+    // still get config from server
+    fetch("/api/get_config", {
+        method: 'GET',
+    }).then((resp) => {
+        return resp.json();
+    }).then((data) => {
+        // sanity check top level of data
+        if (!data.hasOwnProperty("Uc") || !data.hasOwnProperty("Rc")) {
+            console.log("Unexpected response to get_config");
+            return;
+        }
+
+        let config = data.Rc;
+        config.brush = data.Uc;
+        sc.setBoard(config);
+
+        // send config along
+        sc.setBoard(config);
+        sc.enable(true);
+    });
+
+    /*let config = {
         brush: {
             depth: 72,                  // size of brush
             centered: 9,                // how centerd the normal distrobution
@@ -565,9 +602,7 @@ function SingleSetup() {
                 pointup: true,          // point at top, or flat
             },
         ],
-    };
-    sc.setBoard(config);
-    sc.enable(true);
+    };*/
 }
 
 

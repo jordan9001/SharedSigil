@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -69,62 +70,67 @@ var imgPath string
 
 // get_config: give a unique identifier and get back room config
 func getConfig(w http.ResponseWriter, r *http.Request) {
-	// get id and uid from req
-	id_str := r.PostFormValue("id")
-	if len(id_str) == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	id64, err := strconv.ParseUint(id_str, 10, 32)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	id := uint32(id64)
-
-	uid_str := r.PostFormValue("uid")
-	if len(id_str) == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	uid64, err := strconv.ParseUint(uid_str, 10, 32)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	uid := uint32(uid64)
-
-	// lock rooms for reading
-	ok := false
 	var uc userConfig
 	var rc roomConfig
 	var submitted bool
-	{
-		roomsLock.RLock()
+	var ok bool = false
 
-		// check the room/user exists
-		_, ok = rooms[id]
-		if ok {
-			ok = false
-			for k := range rooms[id].users {
-				if uid == rooms[id].users[k].uid {
-					ok = true
-					rc = rooms[id].conf
-					uc = rooms[id].users[k].conf
-					submitted = rooms[id].users[k].submitted
-					break
-				}
-			}
+	// get id and uid from req
+	id_str := r.PostFormValue("id")
+	if len(id_str) == 0 {
+		// create a random config for a singleplayer game
+		ok = true
+		uc = randomUserConfig(1)
+		rc = randomRoomConfig()
+		submitted = false
+	} else {
+
+		id64, err := strconv.ParseUint(id_str, 10, 32)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 
-		// unlock rooms
-		roomsLock.RUnlock()
-	}
+		id := uint32(id64)
 
+		uid_str := r.PostFormValue("uid")
+		if len(id_str) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		uid64, err := strconv.ParseUint(uid_str, 10, 32)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		uid := uint32(uid64)
+
+		// lock rooms for reading
+		ok = false
+		{
+			roomsLock.RLock()
+
+			// check the room/user exists
+			_, ok = rooms[id]
+			if ok {
+				ok = false
+				for k := range rooms[id].users {
+					if uid == rooms[id].users[k].uid {
+						ok = true
+						rc = rooms[id].conf
+						uc = rooms[id].users[k].conf
+						submitted = rooms[id].users[k].submitted
+						break
+					}
+				}
+			}
+
+			// unlock rooms
+			roomsLock.RUnlock()
+		}
+	}
 	// generate a config for the user to return
 	// respond
 	if !ok {
@@ -223,8 +229,10 @@ func sendStrokes(w http.ResponseWriter, r *http.Request) {
 	usr_idx := 0
 	for k := range rooms[id].users {
 		if uid == rooms[id].users[k].uid {
-			ok = true
-			usr_idx = k
+			if !rooms[id].users[k].submitted {
+				ok = true
+				usr_idx = k
+			}
 			break
 		}
 	}
@@ -406,6 +414,58 @@ func getDone(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func randomColorStr(lumabase, lumad, satmax float32) string {
+	// js makes this easy because we can do hsl colors
+	luma := (m_rand.Float32() * 2.0 * lumad) + (lumabase - lumad)
+
+	sat := m_rand.Float32() * satmax
+
+	hue := m_rand.Int() % 360
+
+	luma_i := int(luma)
+	sat_i := int(sat)
+
+	return fmt.Sprintf("hsl(%d, %d%%, %d%%)", hue, sat_i, luma_i)
+}
+
+func randomRoomConfig() roomConfig {
+	var conf roomConfig
+
+	//conf.Bg = "#3f3f4d"
+	conf.Bg = randomColorStr(60.0, 12.0, 12.0)
+
+	num := m_rand.Int() % 5
+	conf.Dots = make([]dotsConfig, num)
+	for i := 0; i < num; i++ {
+		var pup bool = (m_rand.Int() & 1) == 1
+		var pts uint32 = (m_rand.Uint32() & 0x7) + 3
+		var dia float32 = 2.0 / 3.0
+		dia += m_rand.Float32() - 0.5
+		conf.Dots[i] = dotsConfig{
+			Clr:     "#000000",
+			Points:  pts,
+			D:       dia,
+			Rp:      3,
+			Pointup: pup,
+		}
+	}
+
+	return conf
+}
+
+func randomUserConfig(num uint64) userConfig {
+	return userConfig{
+		Clr:            randomColorStr(24.0, 15.0, 45.0),
+		Ink:            240000.0 / float32(num),
+		Depth:          72.0,
+		Centered:       uint((m_rand.Uint32() % 12) + 6),
+		Bristles:       uint((m_rand.Uint32() % 90) + 60),
+		Smoothing:      0.21,
+		LiftSmoothing:  0.06,
+		StartSmoothing: 0.021,
+	}
+}
+
 // create_room: create a room for x people and returns links (used in beginning)
 func createRoom(w http.ResponseWriter, r *http.Request) {
 	// get how many players
@@ -427,20 +487,8 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 	// create room
 	rinf.exp = time.Now().Add(time.Hour * 21)
 	rinf.users = make([]userInfo, num)
-	rinf.conf.Bg = "#3f3f4d" //TODO randomize in a good range
 	rinf.flock = &sync.Mutex{}
-
-	var pup bool = (m_rand.Int() & 1) == 1
-	var pts uint32 = (m_rand.Uint32() & 0x7) + 3
-	var dia float32 = 2.0 / 3.0
-	dia += m_rand.Float32() - 0.5
-	rinf.conf.Dots = []dotsConfig{{
-		Clr:     "#000000",
-		Points:  pts,
-		D:       dia,
-		Rp:      3,
-		Pointup: pup,
-	}}
+	rinf.conf = randomRoomConfig()
 
 	var resp []uint32 = make([]uint32, num+1)
 	for i := 0; i < int(num); i++ {
@@ -461,16 +509,7 @@ func createRoom(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		rinf.users[i].conf = userConfig{
-			Clr:            "#000000", // TODO randomize in a good range
-			Ink:            240000.0 / float32(num),
-			Depth:          72.0,
-			Centered:       uint((m_rand.Uint32() % 9) + 6),
-			Bristles:       uint((m_rand.Uint32() % 60) + 60),
-			Smoothing:      0.21,
-			LiftSmoothing:  0.06,
-			StartSmoothing: 0.021,
-		}
+		rinf.users[i].conf = randomUserConfig(num)
 	}
 
 	maxid := big.NewInt(math.MaxUint32)
@@ -552,7 +591,7 @@ func cleanRooms() {
 
 func main() {
 	var port = flag.String("port", "10987", "Port for sigil server")
-	var imgdir = flag.String("dir", "./testimgs", "Path to image directory")
+	var imgdir = flag.String("dir", "testimgs", "Path to image directory")
 
 	flag.Parse()
 
@@ -570,8 +609,8 @@ func main() {
 	fileServer := http.FileServer(http.Dir("site"))
 	http.Handle("/", fileServer)
 	http.HandleFunc("/s/", serveRoom)
-	sigilServer := http.FileServer(http.Dir(*imgdir))
-	http.Handle("/sigils/", sigilServer)
+	sigilServer := http.FileServer(http.Dir(imgPath))
+	http.Handle("/sigils/", http.StripPrefix("/sigils/", sigilServer))
 	http.HandleFunc("/api/get_config", getConfig)
 	http.HandleFunc("/api/send_strokes", sendStrokes)
 	http.HandleFunc("/api/get_done", getDone)
