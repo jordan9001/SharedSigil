@@ -559,7 +559,6 @@ func serveRoom(w http.ResponseWriter, r *http.Request) {
 
 func cleanRooms() {
 	for {
-		log.Printf("Clean Sweep")
 		//TODO sleep a smart amount based on previous amounts culled
 		time.Sleep(1 * time.Hour)
 
