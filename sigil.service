@@ -1,0 +1,13 @@
+[Unit]
+Description=SharedSigil server
+After=network.target
+
+[Service]
+type=simple
+Restart=no
+User=daemon
+ExecStartPre=mkdir -p /tmp/sigils
+ExecStart=/usr/bin/sigil -port 10987 -dir /tmp/sigils
+
+[Install]
+WantedBy=multi-user.target
