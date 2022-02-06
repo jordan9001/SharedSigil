@@ -69,6 +69,7 @@ let SigilBrush = class {
             let x = Math.cos(ang) * central * hd;
             let y = Math.sin(ang) * central * hd;
             let w = ((1.0 - Math.abs(central)) - 0.5) * 2.0;
+            w *= (Math.random() * 0.1) + 0.95;
             this.pts.push([x, y, w])
         }
 
@@ -200,13 +201,25 @@ let SigilCanvas = class {
         // set up listeners
         let that = this;
 
-        document.addEventListener("mousemove", function(evt) {
+        let moveevt = function(evt) {
             if (!that.enabled) {
                 return;
             }
+            let cx = evt.clientX;
+            let cy = evt.clientY;
+            if (cx === undefined || cy === undefined) {
+                // try touch event
+                if (evt.touches === undefined || evt.touches.length < 1) {
+                    console.log("Unknown move event");
+                    return;
+                }
+                cx = evt.touches[0].clientX;
+                cy = evt.touches[0].clientY;
+            }
+
             let crect = element.getBoundingClientRect();
-            let x = evt.clientX - crect.x;
-            let y = evt.clientY - crect.y;
+            let x = cx - crect.x;
+            let y = cy - crect.y;
 
             // let draw
             // no clearing so we can be nice and smooth
@@ -230,22 +243,29 @@ let SigilCanvas = class {
                     that.writeOut();
                 }
             }
-        }, false);
+        };
+        document.addEventListener("mousemove", moveevt, false);
+        document.addEventListener("touchmove", moveevt, false);
 
-        document.addEventListener("mousedown", function(evt) {
+        let downevt = function(evt) {
             if (!that.enabled) {
                 return;
             }
 
             that.brush.down();
-        }, false);
-        document.addEventListener("mouseup", function(evt) {
+        };
+        document.addEventListener("mousedown", downevt, false);
+        document.addEventListener("touchstart", downevt, false);
+
+        let upevt = function(evt) {
             if (!that.enabled) {
                 return;
             }
 
             that.brush.up();
-        }, false);
+        };
+        document.addEventListener("mouseup", upevt, false);
+        document.addEventListener("touchend", upevt, false);
     }
 
     setBoard(c) {

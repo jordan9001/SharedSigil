@@ -302,27 +302,31 @@ func sendStrokes(w http.ResponseWriter, r *http.Request) {
 		for x := i_bounds.Min.X; x < i_bounds.Max.X; x++ {
 			//TODO some better combo than just add or multiply? subtract maybe?
 
-			var r int32
-			var g int32
-			var b int32
-			var a int32
+			var r float32
+			var g float32
+			var b float32
+			var a float32
 
 			p := rgba.NRGBAAt(x, y)
 			ep := e_rgba.NRGBAAt(x, y)
 
-			r = int32(p.R) + int32(ep.R)
+			// make sure to apply alpha
+			ina := float32(p.A) / float32(math.MaxUint8)
+			ea := float32(ep.A) / float32(math.MaxUint8)
+
+			r = (float32(p.R) * ina) + (float32(ep.R) * ea)
 			if r > math.MaxUint8 {
 				r = math.MaxUint8
 			}
-			g = int32(p.G) + int32(ep.G)
+			g = (float32(p.G) * ina) + (float32(ep.G) * ea)
 			if g > math.MaxUint8 {
 				g = math.MaxUint8
 			}
-			b = int32(p.B) + int32(ep.B)
+			b = (float32(p.B) * ina) + (float32(ep.B) * ea)
 			if b > math.MaxUint8 {
 				b = math.MaxUint8
 			}
-			a = int32(p.A) + int32(ep.A)
+			a = float32(p.A) + float32(ep.A)
 			if a > math.MaxUint8 {
 				a = math.MaxUint8
 			}
@@ -555,8 +559,9 @@ func serveRoom(w http.ResponseWriter, r *http.Request) {
 
 func cleanRooms() {
 	for {
+		log.Printf("Clean Sweep")
 		//TODO sleep a smart amount based on previous amounts culled
-		time.Sleep(120 * time.Second)
+		time.Sleep(1 * time.Hour)
 
 		var found bool
 		var id uint32 = 0
@@ -569,6 +574,7 @@ func cleanRooms() {
 				for k := range rooms {
 					if rooms[k].exp.After(now) {
 						id = k
+						found = true
 						break
 					}
 				}
@@ -576,6 +582,7 @@ func cleanRooms() {
 			}
 
 			if found {
+				log.Printf("Found expired room: %v", id)
 				roomsLock.Lock()
 				// remove the value and delete the file
 				file = rooms[id].filepath
